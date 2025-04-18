@@ -1,0 +1,350 @@
+```yaml
+---
+title: "Car Ownership Cost Analysis"
+authors: "Geisol and Maria"
+output: html_document
+---
+
+
+# Introduction
+
+In this project, we analyze webscraped car ad data (from Blocket) along with vehicle data from Transportstyrelsen and insurance estimates.  
+Our goal is to build a linear model to predict the yearly cost of car ownership.
+
+---
+
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# Load Packages
+install.packages("tidyverse")
+library(tidyverse)
+library(readxl)
+install.packages("fastDummies")
+library(fastDummies)
+install.packages("corrplot")
+library(corrplot)
+install.packages("rsample")
+library(rsample)
+install.packages("yardstick")
+library(yardstick)
+install.packages("car")
+library(car)
+
+# Read the data into R (adjust file name if needed)
+cars_raw <- read_excel("dataset_final.xlsx")
+
+# Step 1: Convert character columns that look numeric (e.g., "1042") into actual numbers
+cars_clean <- cars_raw %>%
+  mutate(across(
+    where(is.character),
+    ~ ifelse(
+        grepl("^[0-9.,]+$", .x),
+        suppressWarnings(as.numeric(gsub(",", "", .x))),
+        .x
+      )
+  )) %>%
+# Step 2: Convert energy consumption to numeric and replace NAs with 0
+  mutate(`Energiförbrukning (Wh/km)` = replace_na(as.numeric(`Energiförbrukning (Wh/km)`), 0))
+
+glimpse(cars_clean)
+
+# Rule of thumb: a car loses between 15–20% of its value per year
+# Source: https://exchange.aaa.com/automotive/car-buying-and-selling/car-resale-value
+# “If I buy this used car today for 120000 kr, how much will it lose in value each year going forward?”
+# Annual depreciation = price × 0.15
+
+cars_clean$"Värdeminskning (kr) per år" <- round(cars_clean$`Pris (kr)` * 0.15, 0)
+
+# If I pay 20% myself and borrow the rest at 7.45% annual interest, this shows how much I pay in interest cost per year
+cars_clean$"Lån (kr) per år" <- round(cars_clean$`Pris (kr)` * 0.80 * 0.0745, 0)
+
+# Set current fuel and electricity prices (kr per liter or kWh)
+pris_bensin <- 15.54   # kr/liter
+pris_diesel <- 16.59   # kr/liter
+pris_el <- 1.50        # kr/kWh
+
+# Create column for fuel cost based on fuel type and consumption
+cars_clean$"Drivmedelskostnad (kr) för 10000 km" <- NA  # Initialize column
+
+# Bensin (Gasoline)
+bensin_index <- grepl("Bensin", cars_clean$Bränsle, ignore.case = TRUE)
+cars_clean$"Drivmedelskostnad (kr) för 10000 km"[bensin_index] <- round(cars_clean$`Bränsleförbrukning (l / 100 km)`[bensin_index] * 100 * pris_bensin, 0)
+
+# Diesel
+diesel_index <- grepl("Diesel", cars_clean$Bränsle, ignore.case = TRUE)
+cars_clean$"Drivmedelskostnad (kr) för 10000 km"[diesel_index] <- round(cars_clean$`Bränsleförbrukning (l / 100 km)`[diesel_index] * 100 * pris_diesel, 0)
+
+# Hybrid or environmentally friendly fuel
+hybrid_index <- grepl("Miljöbränsle|Hybrid", cars_clean$Bränsle, ignore.case = TRUE)
+cars_clean$"Drivmedelskostnad (kr) för 10000 km"[hybrid_index] <- round(cars_clean$`Bränsleförbrukning (l / 100 km)`[hybrid_index] * 100 * pris_bensin, 0)
+
+# Electric cars (electricity only)
+elbilar_index <- !is.na(cars_clean$`Energiförbrukning (Wh/km)`) & is.na(cars_clean$`Bränsleförbrukning (l / 100 km)`)
+cars_clean$"Drivmedelskostnad (kr) för 10000 km"[elbilar_index] <- round((cars_clean$`Energiförbrukning (Wh/km)`[elbilar_index] / 1000) * 10000 * pris_el, 0)
+
+# Plug-in hybrids (both electricity and fuel)
+laddhybrid_index <- !is.na(cars_clean$`Energiförbrukning (Wh/km)`) & !is.na(cars_clean$`Bränsleförbrukning (l / 100 km)`)
+
+# Assume 50% of driving is electric and 50% is fuel-based
+el_kostnad <- (cars_clean$`Energiförbrukning (Wh/km)`[laddhybrid_index] / 1000) * 5000 * pris_el
+bränsle_kostnad <- cars_clean$`Bränsleförbrukning (l / 100 km)`[laddhybrid_index] * 50 * pris_bensin
+cars_clean$"Drivmedelskostnad (kr) för 10000 km"[laddhybrid_index] <- round(el_kostnad + bränsle_kostnad, 0)
+
+# To avoid multicollinearity in regression (i.e. one variable being a perfect combination of others),
+# we use k–1 dummy variables for k categories
+
+cars_clean <- dummy_cols(
+  cars_clean,
+  select_columns = "Bränsle",
+  remove_first_dummy = TRUE,    # referenskategori: El
+  remove_selected_columns = FALSE
+)
+cars_clean$Bränsle <- factor(cars_clean$Bränsle)
+cars_clean$Bränsle <- relevel(cars_clean$Bränsle, ref = "El")
+
+# Replace values in 'Biltyp' by grouping them into broader categories
+cars_clean <- cars_clean %>%
+  mutate(
+    Biltyp = case_when(
+      Biltyp %in% c("Halvkombi", "Kombi", "Sedan") ~ "Personbil",
+      Biltyp %in% c("SUV", "Familjebuss", "Yrkesfordon", "Skåpbil") ~ "Storbil",
+      Biltyp %in% c("Coupé", "Cab") ~ "Sportbil",
+      TRUE ~ "Annat"
+    ),
+    Biltyp = factor(Biltyp)
+  )
+  
+#_____________________________________________________________________________
+ 
+# Exploratory Data Analysis (EDA)
+
+install.packages("summarytools")
+library(summarytools)
+
+# dfSummary
+eda_df <- dfSummary(cars_clean)
+print(eda_df, method = "browser", file = "eda_sammanfattning.html")
+
+
+summary(cars_clean)
+glimpse(cars_clean)
+
+
+# Histogram
+
+cars_clean %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Value") %>%
+  ggplot(aes(x = Value)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  facet_wrap(~ Variable, scales = "free", ncol = 3) +
+  theme_minimal() +
+  labs(title = "Histogram över numeriska variabler")
+
+# Boxplots: Insurance cost by car type
+ggplot(cars_clean, aes(x = Biltyp, y = `Helförsäkring (kr / år)`)) +
+  geom_boxplot(fill = "lightgreen") +
+  theme_minimal() +
+  labs(title = "Försäkringskostnad per Biltyp", x = "Biltyp", y = "Helförsäkring (kr/år)")
+
+# Boxplots: Insurance by fuel type
+ggplot(cars_clean, aes(x = Bränsle, y = `Helförsäkring (kr / år)`)) +
+  geom_boxplot(fill = "lightcoral") +
+  theme_minimal() +
+  labs(title = "Försäkringskostnad per Bränsletyp", x = "Bränsle", y = "Helförsäkring (kr/år)")
+
+# Correlation matrix for numeric variables
+# Where blue shows positive correlation (when one increases, the other increases)
+# Where red shows negative correlation (when one increases, the other decreases)
+
+library(corrplot)
+num_vars <- cars_clean %>% select(where(is.numeric))
+corr_matrix <- cor(num_vars, use = "complete.obs")
+
+corrplot(corr_matrix,
+  method = "circle",
+  type = "upper",
+  tl.cex = 0.6,
+  tl.col = "black",       
+  title = "Korrelationsmatris",
+  mar = c(0, 0, 1, 0)
+)
+
+
+  
+#________________________________________________________________ 
+  
+  
+# 3.Create final model dataset where we use *only* factors
+cars_clean_inf <- cars_clean %>%
+  mutate(
+    Helförsäkring_log = log(`Helförsäkring (kr / år)`),
+    Pris_log = log(`Pris (kr)`),
+    Skatt_log = log(`Fordonsskatt (kr / år)` + 1),
+    Mätar_log = log(`Mätarställning (km)` + 1),
+    CO2_log = log(`Koldioxidutsläpp blandad (NEDC) g/km` + 1),
+    Bränsleförb_log = log(`Bränsleförbrukning (l / 100 km)` + 1)
+  ) %>%
+  select(
+    Helförsäkring_log,
+    Hästkrafter,
+    Modellår,
+    Mätar_log,
+    CO2_log,
+    Bränsleförb_log,
+    Bränsle,
+    `Koldioxidutsläpp blandad (NEDC) g/km`,
+    Biltyp,
+    Pris_log,
+    Skatt_log
+  )
+
+
+glimpse(cars_clean_inf)
+
+# Correlation with Helförsäkringen as target
+
+cars_clean_inf %>%
+  select_if(is.numeric) %>%
+  summarise(across(everything(), ~ cor(.x, cars_clean_inf[["Helförsäkring_log"]], use = "complete.obs"))) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Correlation") %>%
+  arrange(desc(abs(Correlation)))
+  
+#________________________________________________________________________ 
+#  Statistical Inference 
+# Inference for Helförsäkring-model
+
+model_f <- lm(Helförsäkring_log ~ ., data = cars_clean_inf %>% 
+                select(-Bränsleförb_log, -Skatt_log, -`Koldioxidutsläpp blandad (NEDC) g/km`))
+                
+summary(model_f)
+confint(model_f) #Confidence interval
+
+#Diagnostic Pplots
+par(mfrow = c(2, 2))  
+plot(model_f)
+par(mfrow = c(1, 1)) 
+
+vif(model_f)
+
+# Inference for pris-model
+model_p <- lm(Pris_log ~ ., data = cars_clean_inf %>%
+                select(-Helförsäkring_log, -Skatt_log, -Bränsleförb_log, -`Koldioxidutsläpp blandad (NEDC) g/km`))
+
+summary(model_p)
+confint(model_p)
+
+par(mfrow = c(2, 2))
+plot(model_p)
+par(mfrow = c(1, 1))
+
+vif(model_p)
+
+# Create a new data 
+cars_price <- cars_clean %>%
+  select(
+    pris                 = `Pris (kr)`,
+    fordonsskatt         = `Fordonsskatt (kr / år)`,
+    helforsakring        = `Helförsäkring (kr / år)`,
+    hastkrafter          = Hästkrafter,
+    matarstallning       = `Mätarställning (km)`
+  ) %>%
+  mutate(
+    pris_log = log(pris),
+    fordonsskatt_log = log(fordonsskatt + 1),
+    helforsakring_log = log(helforsakring + 1),
+    hastkrafter_log = log(hastkrafter + 1),
+    matarstallning_log = log(matarstallning + 1)
+  ) %>%
+  select(
+    pris,
+    ends_with("_log")
+  )
+
+  glimpse(cars_price)
+  
+#_________________________________________________________________________
+#Building the model
+# Split into training and test sets (80/20)
+set.seed(123)
+
+split <- initial_split(cars_price, prop = 0.8)
+train <- training(split)
+test <- testing(split)
+
+# Train the model 
+model_f <- lm(`pris_log` ~., data = train)
+
+summary(model_f)
+confint(model_f)
+
+#Split to val
+val_split <- initial_split(train, prop = 0.75)
+train_final <- training(val_split)
+val <- testing(val_split)
+
+#Evaluate the model
+val$pred <- predict(model_f, newdata = val)
+
+
+#Calculate RMSE and MAE
+
+rmse <- sqrt(mean((val$pris_log - val$pred)^2))
+mae <- mean(abs(val$pris_log - val$pred))
+
+cat("\n Modellprestanda på valideringsdata:\n")
+cat("🔹 RMSE (Root Mean Squared Error):", round(rmse, 3), "\n")
+cat("🔹 MAE  (Mean Absolute Error):    ", round(mae, 3), "\n")
+
+# Predictions on the test data
+
+test$pred <- predict(model_f, newdata = test)
+
+
+# Evaluate RMSE, MAE och R²
+rmse_test <- sqrt(mean((test$pris_log - test$pred)^2))
+mae_test  <- mean(abs(test$pris_log - test$pred))
+sst <- sum((test$pris_log - mean(test$pris_log))^2)
+sse <- sum((test$pris_log - test$pred)^2)
+r2_test <- 1 - sse/sst
+
+cat("\n Modellprestanda på testdata:\n")
+cat("🔹 RMSE (Root Mean Squared Error):", round(rmse_test, 3), "\n")
+cat("🔹 MAE  (Mean Absolute Error):    ", round(mae_test, 3), "\n")
+cat("🔹 R²   (Förklarad varians):      ", round(r2_test, 3), "\n")
+
+
+# Predictions against real values in both validation data and test data
+
+val$dataset <- "Val"
+test$dataset <- "Test"
+
+combined <- bind_rows(val, test)
+
+# Prediction vs reality
+
+library(ggplot2)
+
+ggplot(combined, aes(x = pris_log, y = pred, color = dataset)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+  theme_minimal() +
+  labs(
+    title = "Predikterat vs Verkligt (log(pris))",
+    x = "Verkligt log-pris",
+    y = "Predikterat log-pris",
+    color = "Dataset"
+  )
+# table with results
+
+resultat_df <- tibble(
+  Dataset = c("Val", "Test"),
+  RMSE = c(rmse_val, rmse_test),
+  MAE  = c(mae, mae_test),
+  R2   = c(r2_val, r2_test)
+)
+
+print(resultat_df)
+
+
