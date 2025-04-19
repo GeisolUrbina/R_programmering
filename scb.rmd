@@ -1,0 +1,75 @@
+---
+title: "Blocket Car Analysis"
+author:
+  - Maria Lagerholm
+  - Geisol Urbina
+format: html
+---
+
+# Introduction
+
+In this project, we analyze web-scraped used car listings from Blocket, enriched with technical specifications from Transportstyrelsen and cost estimates for insurance and taxation in Sweden. The primary goal has shifted from estimating total yearly ownership cost to two main objectives:
+(1) Predicting market prices for used cars in Sweden, with a focus on non-premium, mid-range vehicles, and
+(2) Gaining statistical insight into what factors influence insurance premiums and vehicle taxes, using linear regression models.
+
+By combining predictive modeling (e.g., random forest) with inference-driven approaches (e.g., linear regression), we aim to both improve price prediction accuracy and interpret underlying patterns in insurance and tax structures in the Swedish car market.
+
+
+---
+
+
+```{r}
+
+
+# Installera och ladda paket
+if (!requireNamespace("pxweb", quietly = TRUE)) install.packages("pxweb")
+if (!requireNamespace("ggplot2", quietly = TRUE)) install.packages("ggplot2")
+if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr")
+if (!requireNamespace("scales", quietly = TRUE)) install.packages("scales")
+
+library(pxweb)
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+# 1) Ange API-endpoint och JSON-fil
+api_url   <- "https://api.scb.se/OV0104/v1/doris/sv/ssd/TK/TK1001/TK1001S/SnabbStatTK1001"
+json_file <- "C:/EC_skola/R_programmering/scb/trafik.json"
+
+# 2) Hämta data
+df <- pxweb_get_data(
+  url                = api_url,
+  query              = json_file,
+  column.name.type   = "text",
+  variable.value.type= "text"
+)
+
+
+
+```
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+
+# Byt gärna till enklare kolumnnamn
+colnames(df) <- c("manad", "forandring")
+
+# Om du inte redan gjort detta:
+df$datum <- as.Date(paste0(substr(df$manad, 1, 4), "-", substr(df$manad, 6, 7), "-01"))
+
+ggplot(df, aes(x = datum, y = forandring)) +
+  geom_point(size = 1.5) +
+  geom_smooth(method = "loess", span = 0.2, color = "darkred", se = FALSE, size = 1) +
+  theme_minimal() +
+  labs(
+    title = "Trend för förändring i nyregistrerade bilar",
+    x = "Datum",
+    y = "Förändring jämfört med året innan (%)"
+  )
+
+
+
+```
+
