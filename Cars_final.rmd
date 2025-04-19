@@ -1,0 +1,391 @@
+---
+title: "Blocket Car Analysis"
+author:
+  - Maria
+  - Geisol
+format: html
+---
+
+# Introduction
+
+In this project, we analyze web-scraped used car listings from Blocket, enriched with technical specifications from Transportstyrelsen and cost estimates for insurance and taxation in Sweden. The primary goal has shifted from estimating total yearly ownership cost to two main objectives:
+(1) Predicting market prices for used cars in Sweden, with a focus on non-premium, mid-range vehicles, and
+(2) Gaining statistical insight into what factors influence insurance premiums and vehicle taxes, using linear regression models.
+
+By combining predictive modeling (e.g., random forest) with inference-driven approaches (e.g., linear regression), we aim to both improve price prediction accuracy and interpret underlying patterns in insurance and tax structures in the Swedish car market.
+
+
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+#| results: hide
+
+packages <- c(
+  "tidyverse", "readxl", "fastDummies", "corrplot",
+  "rsample", "GGally", "ggcorrplot", "car", "xgboost", "yardstick", "tibble", "ranger", "glmnet", "vip"
+)
+
+idx <- packages %in% rownames(installed.packages())
+if (any(!idx)) install.packages(packages[!idx])
+
+suppressPackageStartupMessages(
+  invisible(lapply(packages, library, character.only = TRUE))
+)
+```
+
+
+
+```{r}
+#| label: import-and-clean
+#| message: false
+#| warning: false
+
+# Read the data (adjust file name/path if needed) -------------------------
+cars_raw <- read_excel("dataset_final.xlsx")
+
+# 1. Convert character columns that look numeric into numeric --------------
+cars_clean <- cars_raw %>%
+  mutate(across(
+    where(is.character),
+    ~ ifelse(
+        grepl("^[0-9.,]+$", .x),
+        suppressWarnings(as.numeric(gsub(",", "", .x))),
+        .x
+      )
+  )) %>%
+  # 2. Convert energy consumption to numeric and replace NAs with 0 --------
+  mutate(`Energiförbrukning (Wh/km)` = replace_na(as.numeric(`Energiförbrukning (Wh/km)`), 0)) %>%
+  # 3. Convert Modellår to factor ------------------------------------------
+  mutate(Modellår = factor(Modellår)) %>%
+  # 4. Remove Biltyp completely --------------------------------------------
+  select(-Biltyp)
+
+glimpse(cars_clean)
+
+```
+
+
+#Distribution inspection
+
+```{r}
+#| label: distribution-check
+#| message: false
+#| warning: false
+
+# Visualise distributions of all numeric variables -----------------------
+numeric_vars <- cars_clean %>%
+  select(where(is.numeric)) %>%
+  select(where(~ n_distinct(.) > 2)) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Value")
+
+ggplot(numeric_vars, aes(Value)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal() +
+  labs(x = NULL, y = "Count")
+
+```
+
+```{r}
+#| label: modeling-dataset
+#| message: false
+#| warning: false
+
+# Final modelling dataset -------------------------------------------------
+cars_clean_inf <- cars_clean %>%
+  mutate(
+    Helförsäkring_log = log(`Helförsäkring (kr / år)`),
+    Hästkrafter_log        = log(Hästkrafter + 1),
+    Pris_log          = log(`Pris (kr)`),
+    Skatt_log         = log(`Fordonsskatt (kr / år)` + 1),
+    Mätar_log         = log(`Mätarställning (km)` + 1),
+    Bränsleförb_log   = log(`Bränsleförbrukning (l / 100 km)` + 1)
+  ) %>%
+  select(
+    Helförsäkring_log, Hästkrafter_log, Modellår, Mätar_log,
+    Bränsleförb_log, Bränsle, Pris_log, Skatt_log, `Koldioxidutsläpp blandad (NEDC) g/km`
+  )
+
+glimpse(cars_clean_inf)
+```
+
+## Correlation inspection
+
+```{r}
+#| label: correlation
+#| message: false
+#| warning: false
+
+cars_clean_inf %>%
+  select(where(is.numeric)) %>%
+  summarise(across(everything(), ~ cor(.x, cars_clean_inf$Helförsäkring_log, use = "complete.obs"))) %>%
+  pivot_longer(everything(), names_to = "Variable", values_to = "Correlation") %>%
+  arrange(desc(abs(Correlation)))
+```
+
+
+# Statistical Inference
+
+```{r}
+#| label: inference-models-pris
+
+#| message: false
+#| warning: false
+
+model_f <- lm(Helförsäkring_log ~ ., data = cars_clean_inf%>%select(-Bränsleförb_log, -Skatt_log, -`Koldioxidutsläpp blandad (NEDC) g/km`))
+summary(model_f)
+confint(model_f)
+
+# Diagnostics -------------------------------------------------------------
+par(mfrow = c(2, 2))
+plot(model_f)
+par(mfrow = c(1, 1))
+
+vif(model_f)
+
+```
+
+```{r}
+#| label: inference-models-försäkring
+#| message: false
+#| warning: false
+
+model_p <- lm(Pris_log ~ .,  data = cars_clean_inf %>% select(-Helförsäkring_log, -Skatt_log, -Bränsleförb_log, -`Koldioxidutsläpp blandad (NEDC) g/km`))
+
+summary(model_p)
+confint(model_p)
+
+# Diagnostics -------------------------------------------------------------
+par(mfrow = c(2, 2))
+plot(model_p)
+par(mfrow = c(1, 1))
+
+vif(model_p)
+
+```
+
+```{r}
+#| label: inference-models-skatt
+#| message: false
+#| warning: false
+
+model_s <- lm(Skatt_log ~ .,  data = cars_clean_inf %>% select(-Helförsäkring_log, -Bränsleförb_log))
+
+summary(model_s)
+confint(model_s)
+
+# Diagnostics -------------------------------------------------------------
+par(mfrow = c(2, 2))
+plot(model_s)
+par(mfrow = c(1, 1))
+
+vif(model_s)
+
+```
+
+
+
+# Predictive Modeling
+
+```{r}
+#| label: rf-price-prediction
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(fastDummies)
+library(janitor)
+library(rsample)
+library(ranger)
+library(purrr)
+library(yardstick)
+library(tibble)
+library(vip)
+
+# -----------------------------------------------------------
+# Step 1: Data Preparation (log-transformations & dummy vars)
+# -----------------------------------------------------------
+
+
+# Define log-transform target columns
+log_vars <- c(
+  "pris_log", 
+  "fordonsskatt_log", 
+  "helforsakring_log",
+  "hastkrafter_log",
+  "matarstallning_log"
+)
+
+# Clean and transform the dataset
+cars_price <- cars_clean %>% 
+  mutate(id = row_number()) %>%
+  transmute(
+    id,
+    fordonsbenamning = Fordonsbenämning,
+    handelsbeteckning = Handelsbeteckning,
+    pris = `Pris (kr)`,
+    pris_log = log(pris),
+    fordonsskatt_log = log(`Fordonsskatt (kr / år)` + 1),
+    helforsakring_log = log(`Helförsäkring (kr / år)` + 1),
+    hastkrafter_log = log(Hästkrafter + 1),
+    matarstallning_log = log(`Mätarställning (km)` + 1),
+    #co2 = `Koldioxidutsläpp blandad (NEDC) g/km`
+  ) %>%
+  clean_names()
+
+# -----------------------------------------------------------
+# Step 2: Compute outlier thresholds before splitting
+# -----------------------------------------------------------
+compute_outlier_bounds <- function(df, columns, lower = 0.01, upper = 0.99) {
+  map(columns, function(col) {
+    tibble(
+      variable = col,
+      q_low = quantile(df[[col]], lower, na.rm = TRUE),
+      q_high = quantile(df[[col]], upper, na.rm = TRUE)
+    )
+  }) %>% bind_rows()
+}
+
+apply_outlier_filter <- function(df, bounds) {
+  for (i in seq_len(nrow(bounds))) {
+    col <- bounds$variable[i]
+    df <- df %>% filter(.data[[col]] >= bounds$q_low[i], .data[[col]] <= bounds$q_high[i])
+  }
+  df
+}
+
+outlier_bounds <- compute_outlier_bounds(cars_price, log_vars)
+
+# -----------------------------------------------------------
+# Step 3: Initial Split (80/20) stratified by log(price)
+# -----------------------------------------------------------
+set.seed(123)
+split <- initial_split(cars_price, prop = 0.8, strata = pris_log)
+train <- training(split)
+test  <- testing(split)
+
+# Apply outlier removal
+train <- apply_outlier_filter(train, outlier_bounds)
+test  <- apply_outlier_filter(test, outlier_bounds)
+
+# -----------------------------------------------------------
+# Step 4: Hyperparameter Grid Search via 5-fold Cross-validation
+# -----------------------------------------------------------
+set.seed(123)
+folds <- vfold_cv(train, v = 5, strata = pris_log)
+
+param_grid <- expand.grid(
+  num.trees     = c(50, 200),
+  mtry          = floor(ncol(train)/2),
+  min.node.size = c(1, 10),
+  max.depth     = c(2, 12)
+)
+
+cv_results <- purrr::map_dfr(seq_len(nrow(param_grid)), function(i) {
+  p <- param_grid[i, ]
+  fold_metrics <- map_dbl(folds$splits, function(spl) {
+    tr <- analysis(spl)
+    va <- assessment(spl)
+    
+    mod <- ranger(
+      pris_log ~ .,
+      data          = tr %>% select(-id, -fordonsbenamning, -handelsbeteckning, -pris),
+      num.trees     = p$num.trees,
+      mtry          = p$mtry,
+      min.node.size = p$min.node.size,
+      max.depth     = p$max.depth
+    )
+    pred <- predict(mod, va)$predictions
+    rmse_vec(truth = va$pris_log, estimate = pred)
+  })
+  
+  tibble(
+    num.trees     = p$num.trees,
+    mtry          = p$mtry,
+    min.node.size = p$min.node.size,
+    max.depth     = p$max.depth,
+    RMSE_log_CV   = mean(fold_metrics)
+  )
+})
+
+# Select best hyperparameters based on CV
+best_params <- cv_results %>% 
+  slice_min(RMSE_log_CV, n = 1)
+
+
+
+# -----------------------------------------------------------
+# Step 5: Train final model on entire training set
+# -----------------------------------------------------------
+final_model <- ranger(
+  pris_log ~ .,
+  data          = train %>% select(-id, -fordonsbenamning, -handelsbeteckning, -pris),
+  num.trees     = best_params$num.trees,
+  mtry          = best_params$mtry,
+  min.node.size = best_params$min.node.size,
+  max.depth     = best_params$max.depth,
+  importance    = "impurity"
+)
+
+
+# -----------------------------------------------------------
+# Step 7: Evaluate RMSE (final hold-out test set)
+# -----------------------------------------------------------
+# Predictions on test set (hold-out)
+test_pred_log <- predict(final_model, test)$predictions
+test_pred_sek <- exp(test_pred_log)
+
+# Calculate RMSE for test set
+rmse_test_log <- rmse_vec(test$pris_log, test_pred_log)
+rmse_test_sek <- rmse_vec(test$pris, test_pred_sek)
+
+# Compute SEK equivalent of the CV RMSE_log (0.228)
+# Using mean predicted price (SEK) from test set as scaling factor
+mean_test_pred_sek <- mean(test_pred_sek)
+rmse_cv_sek_equiv <- mean_test_pred_sek * best_params$RMSE_log_CV
+
+# Step 8: Results (CV vs. Test)
+results_summary <- tibble(
+  Dataset  = c("5-fold CV (grid-search)", "Test set (hold-out)"),
+  RMSE_log = round(c(best_params$RMSE_log_CV, rmse_test_log), 4),
+  RMSE_SEK = round(c(rmse_cv_sek_equiv, rmse_test_sek), 0)
+)
+
+print(results_summary)
+
+
+
+# -----------------------------------------------------------
+# Step 9: Residual Analysis – overpriced vs. underpriced cars
+# -----------------------------------------------------------
+test_results <- test %>% 
+  mutate(
+    pred_log = test_pred_log,
+    pred_sek = test_pred_sek,
+    diff_sek = pris - pred_sek,
+    diff_pct = 100 * diff_sek / pred_sek
+  ) %>% 
+  select(id, fordonsbenamning, handelsbeteckning, pris, pred_sek, diff_sek, diff_pct)
+
+overpriced  <- test_results %>% arrange(desc(diff_sek)) %>% slice_head(n = 5)
+underpriced <- test_results %>% arrange(diff_sek) %>% slice_head(n = 5)
+
+cat("\nTop 5 Overpriced Cars:\n")
+print(overpriced)
+
+cat("\nTop 5 Underpriced Cars:\n")
+print(underpriced)
+
+# -----------------------------------------------------------
+# Step 10: Variable importance visualization
+# -----------------------------------------------------------
+vip(final_model, num_features = 10, bar = TRUE)
+
+
+```
+
+
+
