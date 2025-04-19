@@ -1,0 +1,117 @@
+---
+title: "Exploratory Data Analysis - Blocketbilar"
+author:
+- Maria
+- Geisol
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+  pdf_document:
+    toc: true
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+#| results: hide
+
+packages <- c("summarytools", "corrplot", "tidyverse", "readxl")
+
+to_install <- packages[!packages %in% installed.packages()]
+if (length(to_install) > 0) install.packages(to_install)
+
+suppressPackageStartupMessages(
+  lapply(packages, library, character.only = TRUE)
+)
+```
+
+
+```{r}
+#| label: data-import
+#| message: false
+#| warning: false
+
+cars_raw <- read_excel("dataset_final.xlsx")
+
+# Lätt datarensning för EDA
+cars_clean <- cars_raw %>%
+  mutate(across(
+    where(is.character),
+    ~ ifelse(grepl("^[0-9.,]+$", .x),
+             suppressWarnings(as.numeric(gsub(",", "", .x))),
+             .x)
+  )) %>%
+  mutate(`Energiförbrukning (Wh/km)` = replace_na(as.numeric(`Energiförbrukning (Wh/km)`), 0))
+
+summary(cars_clean)
+glimpse(cars_clean)
+
+```
+
+## Including Plots
+
+```{r}
+#| label: histograms
+#| message: false
+#| warning: false
+
+cars_clean %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Value") %>%
+  ggplot(aes(x = Value)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  facet_wrap(~ Variable, scales = "free", ncol = 3) +
+  theme_minimal() +
+  labs(title = "Histogram över numeriska variabler")
+
+```
+
+
+```{r}
+#| label: Insurance by car type
+#| message: false
+#| warning: false
+
+if ("Biltyp" %in% colnames(cars_clean)) {
+  ggplot(cars_clean, aes(x = Biltyp, y = `Helförsäkring (kr / år)`)) +
+    geom_boxplot(fill = "lightgreen") +
+    theme_minimal() +
+    labs(title = "Försäkringskostnad per Biltyp", x = "Biltyp", y = "Helförsäkring (kr/år)")
+}
+
+```
+
+```{r}
+#| label: Insurance by fuel type
+#| message: false
+#| warning: false
+
+ggplot(cars_clean, aes(x = Bränsle, y = `Helförsäkring (kr / år)`)) +
+  geom_boxplot(fill = "lightcoral") +
+  theme_minimal() +
+  labs(title = "Försäkringskostnad per Bränsletyp", x = "Bränsle", y = "Helförsäkring (kr/år)")
+
+```
+
+```{r}
+#| label: correlation
+#| message: false
+#| warning: false
+
+num_vars <- cars_clean %>% select(where(is.numeric))
+corr_matrix <- cor(num_vars, use = "complete.obs")
+
+corrplot(corr_matrix,
+         method = "circle",
+         type = "upper",
+         tl.cex = 0.6,
+         tl.col = "black",
+         title = "Korrelationsmatris",
+         mar = c(0, 0, 1, 0))
+
+```
+
+
