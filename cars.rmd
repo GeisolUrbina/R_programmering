@@ -290,8 +290,8 @@ val$pred <- predict(model_f, newdata = val)
 
 #Calculate RMSE and MAE
 
-rmse <- sqrt(mean((val$pris_log - val$pred)^2))
-mae <- mean(abs(val$pris_log - val$pred))
+rmse_val <- sqrt(mean((val$pris_log - val$pred)^2))
+mae_val <- mean(abs(val$pris_log - val$pred))
 
 cat("\n Modellprestanda på valideringsdata:\n")
 cat("🔹 RMSE (Root Mean Squared Error):", round(rmse, 3), "\n")
@@ -342,7 +342,7 @@ resultat_df <- tibble(
   Dataset = c("Val", "Test"),
   RMSE = c(rmse_val, rmse_test),
   MAE  = c(mae, mae_test),
-  R2   = c(r2_val, r2_test)
+
 )
 
 print(resultat_df)
