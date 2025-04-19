@@ -14,12 +14,9 @@ In this project, we analyze web-scraped used car listings from Blocket, enriched
 
 By combining predictive modeling (e.g., random forest) with inference-driven approaches (e.g., linear regression), we aim to both improve price prediction accuracy and interpret underlying patterns in insurance and tax structures in the Swedish car market.
 
-
 ---
 
-
 ```{r}
-
 
 # Installera och ladda paket
 if (!requireNamespace("pxweb", quietly = TRUE)) install.packages("pxweb")
