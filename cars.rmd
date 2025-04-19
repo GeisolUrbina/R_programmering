@@ -294,8 +294,8 @@ rmse_val <- sqrt(mean((val$pris_log - val$pred)^2))
 mae_val <- mean(abs(val$pris_log - val$pred))
 
 cat("\n Modellprestanda på valideringsdata:\n")
-cat("🔹 RMSE (Root Mean Squared Error):", round(rmse, 3), "\n")
-cat("🔹 MAE  (Mean Absolute Error):    ", round(mae, 3), "\n")
+cat("RMSE (Root Mean Squared Error):", round(rmse, 3), "\n")
+cat("MAE  (Mean Absolute Error):    ", round(mae, 3), "\n")
 
 # Predictions on the test data
 
@@ -310,9 +310,9 @@ sse <- sum((test$pris_log - test$pred)^2)
 r2_test <- 1 - sse/sst
 
 cat("\n Modellprestanda på testdata:\n")
-cat("🔹 RMSE (Root Mean Squared Error):", round(rmse_test, 3), "\n")
-cat("🔹 MAE  (Mean Absolute Error):    ", round(mae_test, 3), "\n")
-cat("🔹 R²   (Förklarad varians):      ", round(r2_test, 3), "\n")
+cat("RMSE (Root Mean Squared Error):", round(rmse_test, 3), "\n")
+cat("MAE  (Mean Absolute Error):    ", round(mae_test, 3), "\n")
+cat("R²   (Förklarad varians):      ", round(r2_test, 3), "\n")
 
 
 # Predictions against real values in both validation data and test data
