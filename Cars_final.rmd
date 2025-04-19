@@ -1,8 +1,8 @@
 ---
 title: "Blocket Car Analysis"
 author:
-  - Maria
-  - Geisol
+  - Maria Lagerholm
+  - Geisol Urbina
 format: html
 ---
 
