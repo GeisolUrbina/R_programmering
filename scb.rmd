@@ -19,10 +19,11 @@ By combining predictive modeling (e.g., random forest) with inference-driven app
 ```{r}
 
 # Installera och ladda paket
-if (!requireNamespace("pxweb", quietly = TRUE)) install.packages("pxweb")
-if (!requireNamespace("ggplot2", quietly = TRUE)) install.packages("ggplot2")
-if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr")
-if (!requireNamespace("scales", quietly = TRUE)) install.packages("scales")
+required_packages <- c("pxweb", "ggplot2", "dplyr", "scales")
+
+lapply(required_packages, function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg)
+})
 
 library(pxweb)
 library(ggplot2)
