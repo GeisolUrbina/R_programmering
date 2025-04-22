@@ -1,8 +1,8 @@
 ```yaml
 ---
 title: "Car Ownership Cost Analysis"
-authors: Maria,
-         Geisol
+authors: Maria Lagerholm,
+         Geisol Urbina
 output: html_document
 ---
 
