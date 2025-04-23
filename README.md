@@ -8,4 +8,5 @@ Detta projekt undersöker de faktorer som påverkar priser på begagnade bilar o
 - Maskininlärning för pris- och kostnadsprognoser
 
 ## Du kan se resultaten i:
-- [**Cars_final.rmd**](Cars_final.rmd)
+<a href="cars_final.html" target="_blank">cars_final.html</a>
+
