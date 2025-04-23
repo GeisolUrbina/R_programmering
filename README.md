@@ -7,5 +7,13 @@ Detta projekt undersöker de faktorer som påverkar priser på begagnade bilar o
 - Statistisk inferens (regression, korrelation)
 - Maskininlärning för pris- och kostnadsprognoser
 
-## Du kan se resultaten i:
-<a href="https://ditt-användarnamn.github.io/ditt-repo-namn/Cars_final.html" target="_blank">Visa rapporten som webbsida</a>
+## Resultat
+Resultaten och analyserna presenteras i följande rapporter:
+- [**Cars_final.rmd**](Cars_final.rmd): Prediktiv modellering och regressionsanalys.
+- [**scb.rmd**](scb.rmd):  Analys av trender i fordonsregistrering baserat på SCB-data.
+
+Du kan även ladda ner de färdiga rapporterna som [**Cars_final.html**](Cars_final.html) och [**scb.html**](scb.html)
+
+
+##
+*Projektet är genomfört av Maria Lagerholm och Geisol Yissel Urbina som en del av kursen Programmering i R.*
